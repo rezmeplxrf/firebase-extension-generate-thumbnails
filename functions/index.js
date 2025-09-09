@@ -145,8 +145,16 @@ exports.processVideos = onObjectFinalized({
  * @return {Promise} Promise that resolves when screenshot is taken
  */
 async function takeScreenshot(videoFilePath, newFileName) {
-    return new Promise((resolve, reject) => {
-        ffmpeg({ source: videoFilePath })
+    return new Promise(async (resolve, reject) => {
+        const aspectRatio = await getAspectRatio(videoFilePath);
+
+        const command = ffmpeg({ source: videoFilePath });
+
+        if (aspectRatio) {
+            command.withAspectRatio(aspectRatio);
+        }
+
+        command
             .on("filenames", (filenames) => { })
             .on("end", () => {
                 resolve(null);
@@ -162,8 +170,32 @@ async function takeScreenshot(videoFilePath, newFileName) {
                     filename: newFileName,
                 },
                 os.tmpdir(),
-            )
-            .withAspectRatio(process.env.ASPECT_RATIO);
+            );
+    });
+}
+
+function getAspectRatio(videoFilePath) {
+    return new Promise((resolve, reject) => {
+        ffmpeg.ffprobe(videoFilePath, (err, metadata) => {
+            if (err) {
+                // It's better to resolve with null and log the error
+                // than to reject the whole screenshot process.
+                console.warn(`Could not get video metadata for ${videoFilePath}:`, err);
+                resolve(null);
+                return;
+            }
+            const videoStream = metadata.streams.find(stream => stream.codec_type === 'video');
+            // some containers like webm don't have display_aspect_ratio
+            // but have width and height
+            if (videoStream && videoStream.width && videoStream.height) {
+                resolve(`${videoStream.width}:${videoStream.height}`);
+            } else if (videoStream && videoStream.display_aspect_ratio) {
+                resolve(videoStream.display_aspect_ratio);
+            }
+            else {
+                resolve(null);
+            }
+        });
     });
 }
 
@@ -203,24 +235,6 @@ async function convertToMp4(inputPath, outputPath) {
     });
 }
 
-/**
- * Checks if directory matches the configured video path
- * @param {string} dir - Directory to check
- * @param {string} videoPath - Configured video path
- * @return {boolean} True if directory is valid
- */
-function checkVideoDirectory(dir, videoPath) {
-    const trimmedPath = videoPath && videoPath.replace(/^\/|\/$/g, "");
-    const trimmedDir = dir && dir.replace(/^\/|\/$/g, "");
-
-    if (
-        videoPath === "~" ||
-        (["", ".", "/"].includes(videoPath) && dir === ".") ||
-        trimmedPath == trimmedDir
-    ) {
-        return true;
-    } else return false;
-}
 
 /**
  * Removes file extension from filename
