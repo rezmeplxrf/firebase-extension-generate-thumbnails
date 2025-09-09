@@ -14,9 +14,12 @@ const ffmpeg = require("fluent-ffmpeg");
 // }
 
 
-initializeApp({
-    storageBucket: "roomi-9d2cd",
-});
+initializeApp(
+    {
+        projectId: "roomi-9d2cd",
+        storageBucket: "gs://roomi-9d2cd"
+    }
+);
 
 
 
@@ -44,7 +47,6 @@ async function fileExists(filePath) {
 exports.processVideos = onObjectFinalized({
     region: "asia-northeast3",
     cpu: 1,
-    storageBucket: "roomi-9d2cd",
     memory: "4GiB",
     maxInstances: 100,
     concurrency: 100,
@@ -57,7 +59,7 @@ exports.processVideos = onObjectFinalized({
 },
     async (event) => {
         const object = event.data;
-        const bucket = getStorage("roomi-9d2cd").bucket(object.bucket);
+        const bucket = getStorage().bucket();
         const filePath = object.name;
         const contentType = object.contentType || "";
         const dir = path.dirname(filePath);
