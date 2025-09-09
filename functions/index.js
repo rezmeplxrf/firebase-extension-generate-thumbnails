@@ -49,7 +49,7 @@ exports.processVideos = onObjectFinalized({
                 throw new Error("Could not locate downloaded file");
             }
 
-            const thumbfileName = removeFileExtension(fileName) + "." + process.env.IMAGE_TYPE;
+            const thumbfileName = removeFileExtension(fileName) + "." + "webp";
 
             localThumbFilePath = path.join(os.tmpdir(), thumbfileName);
 
@@ -91,7 +91,7 @@ exports.processVideos = onObjectFinalized({
                 bucket.upload(localThumbFilePath, {
                     destination: cloudThumbFilePath,
                     metadata: {
-                        contentType: `image/${process.env.IMAGE_TYPE}`,
+                        contentType: `image/webp`,
                         cacheControl: 'public, max-age=31536000',
                     },
                     public: true,
@@ -161,7 +161,7 @@ async function takeScreenshot(videoFilePath, newFileName) {
             .takeScreenshots(
                 {
                     count: 1,
-                    timestamps: [Number(process.env.TIMESTAMP)], // in seconds
+                    timestamps: [Number(1)], // in seconds
                     filename: newFileName,
                 },
                 os.tmpdir(),
@@ -173,8 +173,6 @@ function getAspectRatio(videoFilePath) {
     return new Promise((resolve, reject) => {
         ffmpeg.ffprobe(videoFilePath, (err, metadata) => {
             if (err) {
-                // It's better to resolve with null and log the error
-                // than to reject the whole screenshot process.
                 console.warn(`Could not get video metadata for ${videoFilePath}:`, err);
                 resolve(null);
                 return;
@@ -206,17 +204,7 @@ async function convertToMp4(inputPath, outputPath) {
             .videoCodec("libx264")
             .audioCodec("aac");
 
-        if (process.env.VIDEO_SIZE) {
-            command = command.size(process.env.VIDEO_SIZE);
-        }
 
-        if (process.env.VIDEO_BITRATE) {
-            command = command.videoBitrate(process.env.VIDEO_BITRATE);
-        }
-
-        if (process.env.AUDIO_BITRATE) {
-            command = command.audioBitrate(process.env.AUDIO_BITRATE);
-        }
 
         command
             .on("end", () => {
