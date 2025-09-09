@@ -6,12 +6,7 @@ const { initializeApp } = require("firebase-admin/app");
 const { getStorage } = require("firebase-admin/storage");
 const ffmpeg = require("fluent-ffmpeg");
 
-// try {
-//     const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
-//     ffmpeg.setFfmpegPath(ffmpegPath);
-// } catch (error) {
-//     console.warn("Could not set ffmpeg path from installer, using system default");
-// }
+
 
 
 initializeApp();
