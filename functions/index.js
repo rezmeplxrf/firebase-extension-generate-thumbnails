@@ -14,35 +14,8 @@ const ffmpeg = require("fluent-ffmpeg");
 // }
 
 
-initializeApp(
-    {
-        projectId: "roomi-9d2cd",
-        storageBucket: "gs://roomi-9d2cd"
-    }
-);
+initializeApp();
 
-
-
-// Helper function for safe file cleanup
-async function cleanupFile(filePath) {
-    try {
-        if (filePath && await fileExists(filePath)) {
-            await fsPromises.unlink(filePath);
-        }
-    } catch (error) {
-        console.warn(`Failed to cleanup file ${filePath}:`, error.message);
-    }
-}
-
-// Helper function to check if file exists asynchronously
-async function fileExists(filePath) {
-    try {
-        await fsPromises.access(filePath);
-        return true;
-    } catch {
-        return false;
-    }
-}
 
 exports.processVideos = onObjectFinalized({
     region: "asia-northeast3",
@@ -270,4 +243,27 @@ function getThumbnailPath(pathString, videoPath) {
     if (!pathString || pathString === "/") return "";
     if (pathString === "~") return videoPath + "/";
     return pathString;
+}
+
+
+
+// Helper function for safe file cleanup
+async function cleanupFile(filePath) {
+    try {
+        if (filePath && await fileExists(filePath)) {
+            await fsPromises.unlink(filePath);
+        }
+    } catch (error) {
+        console.warn(`Failed to cleanup file ${filePath}:`, error.message);
+    }
+}
+
+// Helper function to check if file exists asynchronously
+async function fileExists(filePath) {
+    try {
+        await fsPromises.access(filePath);
+        return true;
+    } catch {
+        return false;
+    }
 }
