@@ -1,28 +1,58 @@
 const path = require("path");
 const os = require("os");
-const fs = require("fs");
+const fsPromises = require("fs").promises;
 const { v4: uuidv4 } = require("uuid");
 const { onObjectFinalized } = require("firebase-functions/v2/storage");
 const { initializeApp } = require("firebase-admin/app");
 const { getStorage } = require("firebase-admin/storage");
 const ffmpeg = require("fluent-ffmpeg");
 
-try {
-    const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
-    ffmpeg.setFfmpegPath(ffmpegPath);
-} catch (error) {
-    console.warn("Could not set ffmpeg path from installer, using system default");
-}
+// try {
+//     const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
+//     ffmpeg.setFfmpegPath(ffmpegPath);
+// } catch (error) {
+//     console.warn("Could not set ffmpeg path from installer, using system default");
+// }
 
 initializeApp();
+
+// Initialize bucket once for better performance
+const bucket = getStorage().bucket();
+
+// Helper function for safe file cleanup
+async function cleanupFile(filePath) {
+    try {
+        if (filePath && await fileExists(filePath)) {
+            await fsPromises.unlink(filePath);
+        }
+    } catch (error) {
+        console.warn(`Failed to cleanup file ${filePath}:`, error.message);
+    }
+}
+
+// Helper function to check if file exists asynchronously
+async function fileExists(filePath) {
+    try {
+        await fsPromises.access(filePath);
+        return true;
+    } catch {
+        return false;
+    }
+}
 
 exports.processVideos = onObjectFinalized({
     region: "asia-northeast3",
     bucket: "roomi-9d2cd",
     cpu: 1,
     memory: "4GiB",
-    concurrency: 1000,
-    timeoutSeconds: 540
+    maxInstances: 100,
+    concurrency: 100,
+    timeoutSeconds: 540,
+    eventarc: {
+        eventFilters: {
+            "object": "media/videos/**"
+        }
+    }
 }, async (event) => {
     const object = event.data;
     const filePath = object.name;
@@ -31,18 +61,18 @@ exports.processVideos = onObjectFinalized({
     const fileName = path.basename(filePath);
     const fileExtension = path.extname(fileName).toLowerCase();
 
-    if (!checkVideoDirectory(dir, process.env.VIDEO_PATH) ||
-        !contentType.includes("video/")) return;
+    if (!contentType.includes("video/")) return;
 
     const isAlreadyMp4 = fileExtension === ".mp4";
 
+    let tempFilePath, localThumbFilePath, localMp4FilePath;
+
     try {
-        const bucket = getStorage().bucket();
-        const tempFilePath = path.join(os.tmpdir(), fileName);
+        tempFilePath = path.join(os.tmpdir(), fileName);
 
         await bucket.file(filePath).download({ destination: tempFilePath });
 
-        if (!fs.existsSync(tempFilePath)) {
+        if (!(await fileExists(tempFilePath))) {
             throw new Error("Could not locate downloaded file");
         }
 
@@ -53,62 +83,86 @@ exports.processVideos = onObjectFinalized({
         const thumbfileName = prefix + removeFileExtension(fileName) +
             suffix + "." + process.env.IMAGE_TYPE;
 
-        const localThumbFilePath = path.join(os.tmpdir(), thumbfileName);
+        localThumbFilePath = path.join(os.tmpdir(), thumbfileName);
 
         const cloudThumbFilePath = path.join(
             getThumbnailPath(process.env.THUMBNAIL_PATH, dir),
             thumbfileName,
         );
 
-        await takeScreenshot(tempFilePath, thumbfileName);
-
-        if (!fs.existsSync(localThumbFilePath)) {
-            throw new Error("Failed to locate generated file");
+        // Prepare conversion paths if needed
+        let mp4FileName, cloudMp4FilePath;
+        if (!isAlreadyMp4) {
+            mp4FileName = removeFileExtension(fileName) + ".mp4";
+            localMp4FilePath = path.join(os.tmpdir(), mp4FileName);
+            cloudMp4FilePath = path.join(dir, mp4FileName);
         }
 
-        await bucket.upload(localThumbFilePath, {
-            destination: cloudThumbFilePath,
-            metadata: {
-                contentType: `image/${process.env.IMAGE_TYPE}`,
-                metadata: {
-                    firebaseStorageDownloadTokens: uuidv4(),
-                },
-            },
-            public: false,
-        });
-
-        fs.unlinkSync(localThumbFilePath);
+        // Run thumbnail generation and video conversion in parallel
+        const operations = [
+            takeScreenshot(tempFilePath, thumbfileName)
+        ];
 
         if (!isAlreadyMp4) {
-            const mp4FileName = removeFileExtension(fileName) + ".mp4";
-            const localMp4FilePath = path.join(os.tmpdir(), mp4FileName);
-            const cloudMp4FilePath = path.join(dir, mp4FileName);
+            operations.push(convertToMp4(tempFilePath, localMp4FilePath));
+        }
 
-            await convertToMp4(tempFilePath, localMp4FilePath);
+        await Promise.all(operations);
 
-            if (!fs.existsSync(localMp4FilePath)) {
-                throw new Error("Failed to locate converted MP4 file");
-            }
+        // Verify files were created
+        if (!(await fileExists(localThumbFilePath))) {
+            throw new Error("Failed to locate generated thumbnail file");
+        }
 
-            await bucket.upload(localMp4FilePath, {
-                destination: cloudMp4FilePath,
+        if (!isAlreadyMp4 && !(await fileExists(localMp4FilePath))) {
+            throw new Error("Failed to locate converted MP4 file");
+        }
+
+        // Upload files in parallel
+        const uploadOperations = [
+            bucket.upload(localThumbFilePath, {
+                destination: cloudThumbFilePath,
                 metadata: {
-                    contentType: "video/mp4",
+                    contentType: `image/${process.env.IMAGE_TYPE}`,
                     metadata: {
                         firebaseStorageDownloadTokens: uuidv4(),
                     },
                 },
                 public: false,
-            });
+            })
+        ];
 
-            fs.unlinkSync(localMp4FilePath);
+        if (!isAlreadyMp4) {
+            uploadOperations.push(
+                bucket.upload(localMp4FilePath, {
+                    destination: cloudMp4FilePath,
+                    metadata: {
+                        contentType: "video/mp4",
+                        metadata: {
+                            firebaseStorageDownloadTokens: uuidv4(),
+                        },
+                    },
+                    public: false,
+                })
+            );
+        }
 
+        await Promise.all(uploadOperations);
+
+        // Delete original file if conversion was performed
+        if (!isAlreadyMp4) {
             await bucket.file(filePath).delete();
         }
 
-        fs.unlinkSync(tempFilePath);
     } catch (error) {
         console.error("Error processing video:", error);
+    } finally {
+        // Always cleanup temporary files
+        await Promise.allSettled([
+            cleanupFile(tempFilePath),
+            cleanupFile(localThumbFilePath),
+            cleanupFile(localMp4FilePath)
+        ]);
     }
 
     return null;
