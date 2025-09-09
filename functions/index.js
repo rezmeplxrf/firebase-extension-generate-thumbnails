@@ -1,7 +1,6 @@
 const path = require("path");
 const os = require("os");
 const fsPromises = require("fs").promises;
-const { v4: uuidv4 } = require("uuid");
 const { onObjectFinalized } = require("firebase-functions/v2/storage");
 const { initializeApp } = require("firebase-admin/app");
 const { getStorage } = require("firebase-admin/storage");
@@ -124,11 +123,9 @@ exports.processVideos = onObjectFinalized({
                 destination: cloudThumbFilePath,
                 metadata: {
                     contentType: `image/${process.env.IMAGE_TYPE}`,
-                    metadata: {
-                        firebaseStorageDownloadTokens: uuidv4(),
-                    },
+                    cacheControl: 'public, max-age=31536000',
                 },
-                public: false,
+                public: true,
             })
         ];
 
@@ -138,11 +135,10 @@ exports.processVideos = onObjectFinalized({
                     destination: cloudMp4FilePath,
                     metadata: {
                         contentType: "video/mp4",
-                        metadata: {
-                            firebaseStorageDownloadTokens: uuidv4(),
-                        },
+                        cacheControl: 'public, max-age=31536000',
+
                     },
-                    public: false,
+                    public: true,
                 })
             );
         }
