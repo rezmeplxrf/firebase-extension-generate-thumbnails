@@ -178,8 +178,6 @@ function getAspectRatio(videoFilePath) {
                 return;
             }
             const videoStream = metadata.streams.find(stream => stream.codec_type === 'video');
-            // some containers like webm don't have display_aspect_ratio
-            // but have width and height
             if (videoStream && videoStream.width && videoStream.height) {
                 resolve(`${videoStream.width}:${videoStream.height}`);
             } else if (videoStream && videoStream.display_aspect_ratio) {
