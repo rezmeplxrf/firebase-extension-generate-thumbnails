@@ -14,19 +14,25 @@ initializeApp();
 
 exports.processVideos = onObjectFinalized({
     region: "asia-northeast3",
-    cpu: 1,
+    cpu: 2,
     memory: "4GiB",
     maxInstances: 100,
     concurrency: 100,
     timeoutSeconds: 540,
-    eventarc: {
-        eventFilters: {
-            "object": "media/temp/**"
-        }
+    eventFilters: {
+        name: "media/temp/**"
     }
 },
     async (event) => {
         const object = event.data;
+        // skip if it's not /media/temp/
+        console.log("File uploaded:", object.name);
+        if (!object.name.startsWith("media/temp/")) {
+            console.log("File is not in media/temp/, skipping..");
+            return null;
+        }
+
+
         const bucket = getStorage().bucket();
         const filePath = object.name;
         const contentType = object.contentType || "";
