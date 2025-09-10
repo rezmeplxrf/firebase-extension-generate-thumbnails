@@ -31,6 +31,7 @@ exports.processVideos = onObjectFinalized({
         const filePath = object.name;
         const contentType = object.contentType || "";
         const fileName = path.basename(filePath);
+        console.log(`Processing file: ${fileName}, contentType: ${contentType}`);
         const fileExtension = path.extname(fileName).toLowerCase();
 
         if (!contentType.includes("video/")) return;
@@ -44,7 +45,7 @@ exports.processVideos = onObjectFinalized({
             // Download file using stream to reduce memory usage
             const downloadStream = bucket.file(filePath).createReadStream();
             const writeStream = require('fs').createWriteStream(tempFilePath);
-            
+
             await new Promise((resolve, reject) => {
                 downloadStream
                     .pipe(writeStream)
@@ -71,6 +72,7 @@ exports.processVideos = onObjectFinalized({
             const mp4FileName = removeFileExtension(fileName) + ".mp4";
             localMp4FilePath = path.join(os.tmpdir(), mp4FileName);
             const cloudMp4FilePath = path.join("media/videos", mp4FileName);
+            console.log(`localMp4FilePath: ${localMp4FilePath}, cloudMp4FilePath: ${cloudMp4FilePath}`);
 
             // Run thumbnail generation and video conversion in parallel
             const operations = [];
@@ -82,7 +84,9 @@ exports.processVideos = onObjectFinalized({
             }
 
             // Wait for all processing operations to complete
+            console.log("Waiting for operations to complete:", operations.length, "operations");
             await Promise.all(operations);
+            console.log("Operations completed.");
 
             // Verify processed files exist before uploading
             if (!(await fileExists(localThumbFilePath))) {
@@ -145,12 +149,12 @@ exports.processVideos = onObjectFinalized({
                 cleanupFile(tempFilePath),
                 cleanupFile(localThumbFilePath)
             ];
-            
+
             // Only cleanup MP4 file if it was actually created (not for existing MP4s)
             if (!isAlreadyMp4 && localMp4FilePath) {
                 cleanupPromises.push(cleanupFile(localMp4FilePath));
             }
-            
+
             await Promise.allSettled(cleanupPromises);
         }
 
@@ -174,7 +178,6 @@ async function takeScreenshot(videoFilePath, newFileName) {
         }
 
         command
-            .on("filenames", (filenames) => { })
             .on("end", () => {
                 resolve(null);
             })
@@ -225,7 +228,6 @@ async function convertToMp4(inputPath, outputPath) {
         let command = ffmpeg(inputPath)
             .videoCodec("libx264")
             .audioCodec("aac");
-
 
         command
             .on("end", () => {
