@@ -41,7 +41,16 @@ exports.processVideos = onObjectFinalized({
         try {
             tempFilePath = path.join(os.tmpdir(), fileName);
 
-            await bucket.file(filePath).download({ destination: tempFilePath });
+            // Download file using stream to reduce memory usage
+            const downloadStream = bucket.file(filePath).createReadStream();
+            const writeStream = require('fs').createWriteStream(tempFilePath);
+            
+            await new Promise((resolve, reject) => {
+                downloadStream
+                    .pipe(writeStream)
+                    .on('error', reject)
+                    .on('finish', resolve);
+            });
 
             if (!(await fileExists(tempFilePath))) {
                 throw new Error("Could not locate downloaded file");
@@ -68,48 +77,61 @@ exports.processVideos = onObjectFinalized({
 
             operations.push(takeScreenshot(tempFilePath, thumbfileName));
 
-
             if (!isAlreadyMp4) {
                 operations.push(convertToMp4(tempFilePath, localMp4FilePath));
             }
 
-            if (operations.length > 0) {
-                await Promise.all(operations);
+            // Wait for all processing operations to complete
+            await Promise.all(operations);
+
+            // Verify processed files exist before uploading
+            if (!(await fileExists(localThumbFilePath))) {
+                throw new Error(`Thumbnail generation failed - ${localThumbFilePath} not found`);
             }
 
+            if (!isAlreadyMp4 && !(await fileExists(localMp4FilePath))) {
+                throw new Error(`Video conversion failed - ${localMp4FilePath} not found`);
+            }
 
-            bucket.upload(localThumbFilePath, {
-                destination: cloudThumbFilePath,
-                metadata: {
-                    contentType: `image/webp`,
-                    cacheControl: 'public, max-age=31536000',
-                },
-                public: true,
-            });
+            // Run uploads in parallel
+            const uploadOperations = [];
 
-
-            if (!isAlreadyMp4) {
-                await bucket.upload(localMp4FilePath, {
-                    destination: cloudMp4FilePath,
+            uploadOperations.push(
+                bucket.upload(localThumbFilePath, {
+                    destination: cloudThumbFilePath,
                     metadata: {
-                        contentType: "video/mp4",
+                        contentType: `image/webp`,
                         cacheControl: 'public, max-age=31536000',
-
                     },
                     public: true,
-                }
+                })
+            );
+
+            if (!isAlreadyMp4) {
+                uploadOperations.push(
+                    bucket.upload(localMp4FilePath, {
+                        destination: cloudMp4FilePath,
+                        metadata: {
+                            contentType: "video/mp4",
+                            cacheControl: 'public, max-age=31536000',
+                        },
+                        public: true,
+                    })
                 );
             } else {
                 // Move existing MP4 file to media/videos/ with proper metadata
-                await bucket.file(filePath).copy(bucket.file(cloudMp4FilePath), {
-                    metadata: {
-                        contentType: "video/mp4",
-                        cacheControl: 'public, max-age=31536000',
-                    }
-                });
-                await bucket.file(cloudMp4FilePath).makePublic();
-
+                uploadOperations.push(
+                    bucket.file(filePath).copy(bucket.file(cloudMp4FilePath), {
+                        metadata: {
+                            contentType: "video/mp4",
+                            cacheControl: 'public, max-age=31536000',
+                        }
+                    }).then(() => bucket.file(cloudMp4FilePath).makePublic())
+                );
             }
+
+            // Wait for all uploads to complete
+            await Promise.all(uploadOperations);
 
 
             // Always delete original file from temp directory
