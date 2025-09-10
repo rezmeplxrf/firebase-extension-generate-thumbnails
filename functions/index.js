@@ -35,7 +35,7 @@ exports.processVideos = onObjectFinalized({
 
         if (!contentType.includes("video/")) return;
 
-        const isAlreadyMp4 = fileExtension === ".mp4";
+
         let tempFilePath, localThumbFilePath, localMp4FilePath;
 
         try {
@@ -57,23 +57,17 @@ exports.processVideos = onObjectFinalized({
             );
 
             // Prepare conversion paths if needed
-            let mp4FileName, cloudMp4FilePath;
-            if (!isAlreadyMp4) {
-                mp4FileName = removeFileExtension(fileName) + ".mp4";
-                localMp4FilePath = path.join(os.tmpdir(), mp4FileName);
-                cloudMp4FilePath = path.join("media/videos", mp4FileName);
-            } else {
-                // For existing MP4 files, move them to media/videos/
-                mp4FileName = fileName;
-                cloudMp4FilePath = path.join("media/videos", mp4FileName);
-            }
+
+            const isAlreadyMp4 = fileExtension === ".mp4";
+            const mp4FileName = removeFileExtension(fileName) + ".mp4";
+            localMp4FilePath = path.join(os.tmpdir(), mp4FileName);
+            const cloudMp4FilePath = path.join("media/videos", mp4FileName);
 
             // Run thumbnail generation and video conversion in parallel
             const operations = [];
 
-            if (!isAlreadyProcessed) {
-                operations.push(takeScreenshot(tempFilePath, thumbfileName));
-            }
+            operations.push(takeScreenshot(tempFilePath, thumbfileName));
+
 
             if (!isAlreadyMp4) {
                 operations.push(convertToMp4(tempFilePath, localMp4FilePath));
@@ -83,60 +77,40 @@ exports.processVideos = onObjectFinalized({
                 await Promise.all(operations);
             }
 
-            // Verify files were created
-            if (!isAlreadyProcessed && !(await fileExists(localThumbFilePath))) {
-                throw new Error("Failed to locate generated thumbnail file");
-            }
 
-            if (!isAlreadyMp4 && !(await fileExists(localMp4FilePath))) {
-                throw new Error("Failed to locate converted MP4 file");
-            }
+            bucket.upload(localThumbFilePath, {
+                destination: cloudThumbFilePath,
+                metadata: {
+                    contentType: `image/webp`,
+                    cacheControl: 'public, max-age=31536000',
+                },
+                public: true,
+            });
 
-            // Upload files in parallel
-            const uploadOperations = [];
-
-            if (!isAlreadyProcessed) {
-                uploadOperations.push(
-                    bucket.upload(localThumbFilePath, {
-                        destination: cloudThumbFilePath,
-                        metadata: {
-                            contentType: `image/webp`,
-                            cacheControl: 'public, max-age=31536000',
-                        },
-                        public: true,
-                    })
-                );
-            }
 
             if (!isAlreadyMp4) {
-                uploadOperations.push(
-                    bucket.upload(localMp4FilePath, {
-                        destination: cloudMp4FilePath,
-                        metadata: {
-                            contentType: "video/mp4",
-                            cacheControl: 'public, max-age=31536000',
+                await bucket.upload(localMp4FilePath, {
+                    destination: cloudMp4FilePath,
+                    metadata: {
+                        contentType: "video/mp4",
+                        cacheControl: 'public, max-age=31536000',
 
-                        },
-                        public: true,
-                    })
+                    },
+                    public: true,
+                }
                 );
             } else {
                 // Move existing MP4 file to media/videos/ with proper metadata
-                uploadOperations.push(
-                    bucket.file(filePath).copy(bucket.file(cloudMp4FilePath), {
-                        metadata: {
-                            contentType: "video/mp4",
-                            cacheControl: 'public, max-age=31536000',
-                        }
-                    }).then(() => {
-                        return bucket.file(cloudMp4FilePath).makePublic();
-                    })
-                );
+                await bucket.file(filePath).copy(bucket.file(cloudMp4FilePath), {
+                    metadata: {
+                        contentType: "video/mp4",
+                        cacheControl: 'public, max-age=31536000',
+                    }
+                });
+                await bucket.file(cloudMp4FilePath).makePublic();
+
             }
 
-            if (uploadOperations.length > 0) {
-                await Promise.all(uploadOperations);
-            }
 
             // Always delete original file from temp directory
             await bucket.file(filePath).delete();
@@ -223,7 +197,6 @@ async function convertToMp4(inputPath, outputPath) {
         let command = ffmpeg(inputPath)
             .videoCodec("libx264")
             .audioCodec("aac");
-
 
 
         command
