@@ -18,10 +18,7 @@ exports.processVideos = onObjectFinalized({
     memory: "4GiB",
     maxInstances: 100,
     concurrency: 100,
-    timeoutSeconds: 540,
-    eventFilters: {
-        name: "media/temp/**"
-    }
+    timeoutSeconds: 540
 },
     async (event) => {
         const object = event.data;
@@ -73,8 +70,8 @@ exports.processVideos = onObjectFinalized({
             );
 
             // Prepare conversion paths if needed
-
-            isAlreadyMp4 = fileExtension === ".mp4";
+            // 일단 모든 파일을 인코딩
+            isAlreadyMp4 = false; // fileExtension === ".mp4";
             const mp4FileName = removeFileExtension(fileName) + ".mp4";
             localMp4FilePath = path.join(os.tmpdir(), mp4FileName);
             const cloudMp4FilePath = path.join("media/videos", mp4FileName);
@@ -85,9 +82,9 @@ exports.processVideos = onObjectFinalized({
 
             operations.push(takeScreenshot(tempFilePath, thumbfileName));
 
-            if (!isAlreadyMp4) {
-                operations.push(convertToMp4(tempFilePath, localMp4FilePath));
-            }
+
+            operations.push(convertToMp4(tempFilePath, localMp4FilePath));
+
 
             // Wait for all processing operations to complete
             console.log("Waiting for operations to complete:", operations.length, "operations");
@@ -102,6 +99,7 @@ exports.processVideos = onObjectFinalized({
             if (!isAlreadyMp4 && !(await fileExists(localMp4FilePath))) {
                 throw new Error(`Video conversion failed - ${localMp4FilePath} not found`);
             }
+
 
             // Run uploads in parallel
             const uploadOperations = [];
@@ -231,11 +229,14 @@ function getAspectRatio(videoFilePath) {
  */
 async function convertToMp4(inputPath, outputPath) {
     return new Promise((resolve, reject) => {
-        let command = ffmpeg(inputPath)
+        ffmpeg(inputPath)
             .videoCodec("libx264")
-            .audioCodec("aac");
-
-        command
+            .audioCodec("aac")
+            .outputOptions([
+                "-crf 28",
+                "-preset veryfast",
+                "-movflags +faststart"
+            ])
             .on("end", () => {
                 resolve(null);
             })
