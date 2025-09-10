@@ -72,9 +72,16 @@ exports.processVideos = onObjectFinalized({
             // Prepare conversion paths if needed
             // 일단 모든 파일을 인코딩
             isAlreadyMp4 = false; // fileExtension === ".mp4";
-            const mp4FileName = removeFileExtension(fileName) + ".mp4";
-            localMp4FilePath = path.join(os.tmpdir(), mp4FileName);
+            const baseName = removeFileExtension(fileName);
+            const mp4FileName = baseName + ".mp4";
             const cloudMp4FilePath = path.join("media/videos", mp4FileName);
+
+            if (tempFilePath === path.join(os.tmpdir(), mp4FileName)) {
+                // Input is already an MP4, create a new name for the output to avoid conflict
+                localMp4FilePath = path.join(os.tmpdir(), baseName + "_converted.mp4");
+            } else {
+                localMp4FilePath = path.join(os.tmpdir(), mp4FileName);
+            }
             console.log(`localMp4FilePath: ${localMp4FilePath}, cloudMp4FilePath: ${cloudMp4FilePath}`);
 
             // Run thumbnail generation and video conversion in parallel
