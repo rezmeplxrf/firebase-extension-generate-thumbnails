@@ -36,7 +36,7 @@ exports.processVideos = onObjectFinalized({
         if (!contentType.includes("video/")) return;
 
 
-        let tempFilePath, localThumbFilePath, localMp4FilePath;
+        let tempFilePath, localThumbFilePath, localMp4FilePath, isAlreadyMp4;
 
         try {
             tempFilePath = path.join(os.tmpdir(), fileName);
@@ -67,7 +67,7 @@ exports.processVideos = onObjectFinalized({
 
             // Prepare conversion paths if needed
 
-            const isAlreadyMp4 = fileExtension === ".mp4";
+            isAlreadyMp4 = fileExtension === ".mp4";
             const mp4FileName = removeFileExtension(fileName) + ".mp4";
             localMp4FilePath = path.join(os.tmpdir(), mp4FileName);
             const cloudMp4FilePath = path.join("media/videos", mp4FileName);
@@ -140,12 +140,18 @@ exports.processVideos = onObjectFinalized({
         } catch (error) {
             console.error("Error processing video:", error);
         } finally {
-            // Always cleanup temporary files
-            await Promise.allSettled([
+            // Cleanup temporary files that were actually created
+            const cleanupPromises = [
                 cleanupFile(tempFilePath),
-                cleanupFile(localThumbFilePath),
-                cleanupFile(localMp4FilePath)
-            ]);
+                cleanupFile(localThumbFilePath)
+            ];
+            
+            // Only cleanup MP4 file if it was actually created (not for existing MP4s)
+            if (!isAlreadyMp4 && localMp4FilePath) {
+                cleanupPromises.push(cleanupFile(localMp4FilePath));
+            }
+            
+            await Promise.allSettled(cleanupPromises);
         }
 
         return null;
